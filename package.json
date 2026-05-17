@@ -1,0 +1,13 @@
+{
+  "name": "ai-learning-os",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/admin_next"
+  ],
+  "scripts": {
+    "admin:dev": "npm --prefix apps/admin_next run dev",
+    "admin:build": "npm --prefix apps/admin_next run build"
+  }
+}
+

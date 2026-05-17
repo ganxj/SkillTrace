@@ -1,0 +1,105 @@
+{
+  "slug": "quant_v1",
+  "name": "量化学习基础包",
+  "version": "0.1.0",
+  "description": "用于验证 AI Learning OS 的第一个领域包，只覆盖碎片化学习、概念理解和能力评估，不包含回测执行、策略运行或交易实验。",
+  "skills": [
+    {
+      "slug": "market_basics",
+      "title": "市场基础",
+      "summary": "理解价格、成交量、收益率、波动率和市场参与者的基础概念。",
+      "kind": "concept",
+      "difficulty": 1,
+      "estimated_minutes": 5,
+      "order_index": 1,
+      "content": "用 5 分钟建立市场语言：价格描述结果，成交量描述活跃度，收益率描述相对变化，波动率描述不确定性。学习目标不是预测市场，而是先能准确描述市场。"
+    },
+    {
+      "slug": "return_and_risk",
+      "title": "收益与风险",
+      "summary": "区分收益率、最大回撤、波动率和风险暴露。",
+      "kind": "concept",
+      "difficulty": 1,
+      "estimated_minutes": 5,
+      "order_index": 2,
+      "prerequisites": ["market_basics"],
+      "content": "收益回答赚了多少，风险回答为了这些收益承受了什么不确定性。高收益如果伴随更大回撤，不代表学习者已经理解策略质量。"
+    },
+    {
+      "slug": "probability_distribution",
+      "title": "概率分布",
+      "summary": "理解随机变量、均值、方差、分布形状和尾部风险。",
+      "kind": "concept",
+      "difficulty": 2,
+      "estimated_minutes": 8,
+      "order_index": 3,
+      "content": "概率分布描述一组结果可能如何出现。量化学习中最重要的是理解不确定性，而不是把单次结果当规律。"
+    },
+    {
+      "slug": "statistics_estimation",
+      "title": "统计估计",
+      "summary": "理解样本、估计误差、置信度和过拟合风险。",
+      "kind": "concept",
+      "difficulty": 2,
+      "estimated_minutes": 8,
+      "order_index": 4,
+      "prerequisites": ["probability_distribution"],
+      "content": "统计估计不是寻找确定答案，而是在有限数据下形成有置信度的判断。样本太少时，漂亮结论很可能只是噪声。"
+    },
+    {
+      "slug": "python_data_tools",
+      "title": "Python 数据工具",
+      "summary": "理解用 Python 处理表格、时间序列和指标计算的基本能力。",
+      "kind": "skill",
+      "difficulty": 2,
+      "estimated_minutes": 8,
+      "order_index": 5,
+      "content": "学习目标是能读懂数据处理流程：加载数据、清洗字段、按时间排序、计算基础指标。这里不承载真实研究环境。"
+    },
+    {
+      "slug": "backtest_concepts",
+      "title": "回测概念",
+      "summary": "理解回测的目的、假设、偏差和局限，不在本系统执行回测。",
+      "kind": "concept",
+      "difficulty": 3,
+      "estimated_minutes": 8,
+      "order_index": 6,
+      "prerequisites": ["return_and_risk", "python_data_tools", "statistics_estimation"],
+      "content": "回测是学习和验证假设的工具，不是本系统的功能入口。需要理解幸存者偏差、未来函数、手续费和滑点等概念。"
+    },
+    {
+      "slug": "factor_model_basics",
+      "title": "因子模型基础",
+      "summary": "理解因子、暴露、收益解释和因子失效。",
+      "kind": "concept",
+      "difficulty": 3,
+      "estimated_minutes": 10,
+      "order_index": 7,
+      "prerequisites": ["statistics_estimation", "return_and_risk"],
+      "content": "因子是解释或预测资产表现的特征。学习重点是理解因子为什么可能有效，以及为什么历史有效不代表未来有效。"
+    },
+    {
+      "slug": "risk_control_basics",
+      "title": "风险控制基础",
+      "summary": "理解仓位、集中度、回撤、止损和组合风险。",
+      "kind": "concept",
+      "difficulty": 3,
+      "estimated_minutes": 8,
+      "order_index": 8,
+      "prerequisites": ["return_and_risk", "probability_distribution"],
+      "content": "风险控制不是减少收益，而是限制错误判断的破坏力。学习者需要能解释一种风险指标适合解决什么问题。"
+    },
+    {
+      "slug": "strategy_reasoning",
+      "title": "策略推理",
+      "summary": "用假设、证据、风险和反例描述一个策略想法。",
+      "kind": "transfer",
+      "difficulty": 4,
+      "estimated_minutes": 10,
+      "order_index": 9,
+      "prerequisites": ["backtest_concepts", "factor_model_basics", "risk_control_basics"],
+      "content": "策略推理要求把想法说清楚：假设是什么，证据是什么，可能失败在哪里，风险如何控制。本系统只训练表达和判断，不运行策略。"
+    }
+  ]
+}
+
