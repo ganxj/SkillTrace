@@ -13,6 +13,13 @@ class DomainPackRead(BaseModel):
     description: str
 
 
+class QuizQuestionRead(BaseModel):
+    prompt: str
+    options: list[str]
+    correct_index: int
+    explanation: str
+
+
 class SkillRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -25,6 +32,9 @@ class SkillRead(BaseModel):
     difficulty: int
     estimated_minutes: int
     content: str
+    lesson_explain: str = ""
+    key_points: list[str] = Field(default_factory=list)
+    questions: list[QuizQuestionRead] = Field(default_factory=list)
     order_index: int
     prerequisites: list[str] = Field(default_factory=list)
 
@@ -113,3 +123,23 @@ class TutorMessageRead(BaseModel):
     user_message_id: str
     assistant_message_id: str
 
+
+class ContentImportRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    filename: str
+    content_type: str
+    status: str
+    error: str
+    domain_id: str | None
+    created_at: datetime
+    completed_at: datetime | None
+    domain: DomainPackRead | None = None
+
+
+class ContentImportCreateRead(BaseModel):
+    import_record: ContentImportRead
+    domain: DomainPackRead
+    skill_count: int
+    question_count: int

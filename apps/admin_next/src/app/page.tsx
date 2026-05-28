@@ -11,14 +11,14 @@ export default async function Home() {
         <header className="topbar">
           <div>
             <p className="eyebrow">AI Learning OS Admin</p>
-            <h1>API Offline</h1>
+            <h1>后端未连接</h1>
           </div>
           <div className="status">local</div>
         </header>
         <section className="panel">
-          <h2>Backend connection failed</h2>
+          <h2>无法连接后端服务</h2>
           <p className="muted">
-            Start the FastAPI service at http://localhost:8000/api/v1 and refresh this page.
+            请先启动 FastAPI 服务：http://192.168.1.192:8001/api/v1，然后刷新页面。
           </p>
           <pre>{error instanceof Error ? error.message : "Unknown error"}</pre>
         </section>
@@ -26,4 +26,3 @@ export default async function Home() {
     );
   }
 }
-

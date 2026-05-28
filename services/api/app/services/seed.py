@@ -51,6 +51,9 @@ def seed_domain_pack(manifest_path: Path) -> None:
             skill.difficulty = item.get("difficulty", 1)
             skill.estimated_minutes = item.get("estimated_minutes", 5)
             skill.content = item.get("content", "")
+            skill.lesson_explain = item.get("lesson_explain", item.get("content", ""))
+            skill.key_points_json = json.dumps(item.get("key_points", []), ensure_ascii=False)
+            skill.questions_json = json.dumps(item.get("questions", []), ensure_ascii=False)
             skill.order_index = item.get("order_index", index)
             skill_by_slug[item["slug"]] = skill
 
@@ -78,4 +81,3 @@ def seed_domain_pack(manifest_path: Path) -> None:
                         )
                     )
         db.commit()
-

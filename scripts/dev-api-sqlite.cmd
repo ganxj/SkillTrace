@@ -10,4 +10,4 @@ if not exist ".venv\Scripts\uvicorn.exe" (
   echo services\api\.venv\Scripts\pip.exe install -r services\api\requirements.txt
   exit /b 1
 )
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+".venv\Scripts\python.exe" -m uvicorn app.main:app --host 192.168.1.192 --port 8001

@@ -1,10 +1,13 @@
 from app.schemas.learning import (
+    ContentImportCreateRead,
+    ContentImportRead,
     DomainPackRead,
     LearnerSkillStateRead,
     LearningSessionCreate,
     LearningSessionRead,
     MasteryEvidenceCreate,
     MasteryEvidenceRead,
+    QuizQuestionRead,
     ReviewItem,
     SkillRead,
     TutorMessageCreate,
@@ -13,14 +16,16 @@ from app.schemas.learning import (
 
 __all__ = [
     "DomainPackRead",
+    "ContentImportCreateRead",
+    "ContentImportRead",
     "LearnerSkillStateRead",
     "LearningSessionCreate",
     "LearningSessionRead",
     "MasteryEvidenceCreate",
     "MasteryEvidenceRead",
+    "QuizQuestionRead",
     "ReviewItem",
     "SkillRead",
     "TutorMessageCreate",
     "TutorMessageRead",
 ]
-

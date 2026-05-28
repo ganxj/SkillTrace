@@ -27,7 +27,7 @@ class _TutorScreenState extends State<TutorScreen> {
   Widget build(BuildContext context) {
     return ScreenFrame(
       title: 'AI Tutor',
-      subtitle: '默认 Mock，可由后端 AI_PROVIDER 切换到 OpenAI。',
+      subtitle: '围绕当前学习内容提问，Tutor 会给出短解释和下一步建议。',
       child: Column(
         children: [
           if (_lines.isEmpty)
@@ -69,7 +69,8 @@ class _TutorScreenState extends State<TutorScreen> {
     });
     try {
       final reply = await widget.api.sendTutorMessage(message: text);
-      setState(() => _lines.add(_ChatLine(role: 'Tutor (${reply.provider})', text: reply.response)));
+      setState(() => _lines.add(
+          _ChatLine(role: 'Tutor (${reply.provider})', text: reply.response)));
     } catch (error) {
       setState(() => _lines.add(_ChatLine(role: '系统', text: '发送失败：$error')));
     } finally {
@@ -98,7 +99,8 @@ class _ChatBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(line.role, style: const TextStyle(fontWeight: FontWeight.w700)),
+            Text(line.role,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
             Text(line.text),
           ],
@@ -107,4 +109,3 @@ class _ChatBubble extends StatelessWidget {
     );
   }
 }
-

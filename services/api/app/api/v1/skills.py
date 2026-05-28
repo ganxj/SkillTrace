@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,7 +24,28 @@ def list_skills(
         query = query.where(SkillNode.domain_id == domain.id)
     skills = list(db.scalars(query).all())
     prereq_map = prerequisites_by_skill(db, [skill.id for skill in skills])
-    return [SkillRead.model_validate(skill).model_copy(update={"prerequisites": prereq_map[skill.id]}) for skill in skills]
+    return [skill_to_read(skill, prereq_map[skill.id]) for skill in skills]
+
+
+def skill_to_read(skill: SkillNode, prerequisites: list[str]) -> SkillRead:
+    return SkillRead.model_validate(skill).model_copy(
+        update={
+            "lesson_explain": skill.lesson_explain or skill.content,
+            "key_points": _load_json_list(skill.key_points_json),
+            "questions": _load_json_list(skill.questions_json),
+            "prerequisites": prerequisites,
+        }
+    )
+
+
+def _load_json_list(value: str | None) -> list:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
 
 
 def prerequisites_by_skill(db: Session, skill_ids: list[str]) -> dict[str, list[str]]:
@@ -37,4 +60,3 @@ def prerequisites_by_skill(db: Session, skill_ids: list[str]) -> dict[str, list[
     for skill_id, prereq_slug in rows:
         result[skill_id].append(prereq_slug)
     return result
-

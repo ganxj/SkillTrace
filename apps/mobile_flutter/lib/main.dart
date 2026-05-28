@@ -54,9 +54,12 @@ class _LearningShellState extends State<LearningShell> {
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.today_outlined), label: '今日'),
-          NavigationDestination(icon: Icon(Icons.account_tree_outlined), label: '技能'),
-          NavigationDestination(icon: Icon(Icons.refresh_outlined), label: '复习'),
-          NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Tutor'),
+          NavigationDestination(
+              icon: Icon(Icons.menu_book_outlined), label: '课程'),
+          NavigationDestination(
+              icon: Icon(Icons.refresh_outlined), label: '复习'),
+          NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline), label: 'Tutor'),
         ],
       ),
     );

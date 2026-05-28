@@ -36,6 +36,9 @@ class SkillNode(Base):
     difficulty: Mapped[int] = mapped_column(Integer, default=1)
     estimated_minutes: Mapped[int] = mapped_column(Integer, default=5)
     content: Mapped[str] = mapped_column(Text, default="")
+    lesson_explain: Mapped[str] = mapped_column(Text, default="")
+    key_points_json: Mapped[str] = mapped_column(Text, default="[]")
+    questions_json: Mapped[str] = mapped_column(Text, default="[]")
     order_index: Mapped[int] = mapped_column(Integer, default=0)
 
     domain: Mapped[DomainPack] = relationship(back_populates="skills")
@@ -125,3 +128,19 @@ class TutorMessage(Base):
     provider: Mapped[str] = mapped_column(String(40), default="mock")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
+class ContentImport(Base):
+    __tablename__ = "content_imports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    filename: Mapped[str] = mapped_column(String(260))
+    content_type: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    extracted_text: Mapped[str] = mapped_column(Text, default="")
+    generated_json: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    domain_id: Mapped[str | None] = mapped_column(ForeignKey("domain_packs.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    domain: Mapped[DomainPack | None] = relationship()

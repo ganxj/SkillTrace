@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.db.session import Base, engine
+from app.db.schema import ensure_schema
 from app.services.seed import seed_domain_packs
 
 
@@ -20,7 +20,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def on_startup() -> None:
-        Base.metadata.create_all(bind=engine)
+        ensure_schema()
         if settings.seed_domain_packs:
             seed_domain_packs()
 
@@ -28,4 +28,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

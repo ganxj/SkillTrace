@@ -1,4 +1,5 @@
 from app.models.learning import (
+    ContentImport,
     DomainPack,
     LearnerSkillState,
     LearningSession,
@@ -9,6 +10,7 @@ from app.models.learning import (
 )
 
 __all__ = [
+    "ContentImport",
     "DomainPack",
     "LearnerSkillState",
     "LearningSession",
@@ -17,4 +19,3 @@ __all__ = [
     "SkillNode",
     "TutorMessage",
 ]
-

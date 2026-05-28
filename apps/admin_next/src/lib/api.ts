@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://192.168.1.192:8001/api/v1";
 
 export type DomainPack = {
   id: string;
@@ -6,6 +6,20 @@ export type DomainPack = {
   name: string;
   version: string;
   description: string;
+};
+
+export type CourseSummary = {
+  domain: DomainPack;
+  skillCount: number;
+  questionCount: number;
+  skills: Skill[];
+};
+
+export type QuizQuestion = {
+  prompt: string;
+  options: string[];
+  correct_index: number;
+  explanation: string;
 };
 
 export type Skill = {
@@ -18,8 +32,23 @@ export type Skill = {
   difficulty: number;
   estimated_minutes: number;
   content: string;
+  lesson_explain: string;
+  key_points: string[];
+  questions: QuizQuestion[];
   order_index: number;
   prerequisites: string[];
+};
+
+export type ContentImport = {
+  id: string;
+  filename: string;
+  content_type: string;
+  status: string;
+  error: string;
+  domain_id: string | null;
+  created_at: string;
+  completed_at: string | null;
+  domain: DomainPack | null;
 };
 
 export type LearnerState = {
@@ -62,12 +91,24 @@ async function fetchJson<T>(path: string): Promise<T> {
 }
 
 export async function getDashboardData() {
-  const [domains, skills, states, evidence] = await Promise.all([
-    fetchJson<DomainPack[]>("/domains"),
-    fetchJson<Skill[]>("/skills?domain_slug=quant_v1"),
+  const domains = await fetchJson<DomainPack[]>("/domains");
+  const latestDomain = await fetchJson<DomainPack>("/domains/latest");
+  const [skills, states, evidence, imports] = await Promise.all([
+    fetchJson<Skill[]>(`/skills?domain_slug=${latestDomain.slug}`),
     fetchJson<LearnerState[]>("/learner/state"),
-    fetchJson<Evidence[]>("/evidence?limit=12")
+    fetchJson<Evidence[]>("/evidence?limit=12"),
+    fetchJson<ContentImport[]>("/imports")
   ]);
-  return { domains, skills, states, evidence };
+  const courseSummaries = await Promise.all(
+    domains.map(async (domain) => {
+      const domainSkills = await fetchJson<Skill[]>(`/skills?domain_slug=${domain.slug}`);
+      return {
+        domain,
+        skillCount: domainSkills.length,
+        questionCount: domainSkills.reduce((sum, skill) => sum + skill.questions.length, 0),
+        skills: domainSkills
+      };
+    })
+  );
+  return { domains, latestDomain, skills, states, evidence, imports, courseSummaries };
 }
-
