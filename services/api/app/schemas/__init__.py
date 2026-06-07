@@ -1,6 +1,7 @@
 from app.schemas.learning import (
     ContentImportCreateRead,
     ContentImportRead,
+    DomainPackCreate,
     DomainPackRead,
     LearnerSkillStateRead,
     LearningSessionCreate,
@@ -16,6 +17,7 @@ from app.schemas.learning import (
 
 __all__ = [
     "DomainPackRead",
+    "DomainPackCreate",
     "ContentImportCreateRead",
     "ContentImportRead",
     "LearnerSkillStateRead",

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, nullsfirst, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -16,11 +16,20 @@ router = APIRouter()
 @router.get("/next", response_model=list[ReviewItem])
 def next_review(
     limit: int = 5,
+    domain_slug: str | None = None,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_user_id),
 ) -> list[ReviewItem]:
     now = datetime.utcnow()
-    latest_domain = db.scalar(select(DomainPack).order_by(desc(DomainPack.created_at)))
+    domain_query = select(DomainPack)
+    if domain_slug:
+        domain_query = domain_query.where(DomainPack.slug == domain_slug)
+    else:
+        domain_query = domain_query.order_by(desc(DomainPack.created_at))
+    active_domain = db.scalar(domain_query)
+    if domain_slug and active_domain is None:
+        raise HTTPException(status_code=404, detail="Course not found.")
+
     due_states = list(
         db.scalars(
             select(LearnerSkillState)
@@ -34,8 +43,8 @@ def next_review(
             .limit(limit)
         ).all()
     )
-    if latest_domain is not None:
-        due_states = [state for state in due_states if state.skill and state.skill.domain_id == latest_domain.id]
+    if active_domain is not None:
+        due_states = [state for state in due_states if state.skill and state.skill.domain_id == active_domain.id]
     due_states = [state for state in due_states if state.review_due_at is None or state.review_due_at <= now]
 
     items: list[ReviewItem] = []
@@ -56,8 +65,8 @@ def next_review(
 
     seen_skill_ids = {item.skill.id for item in items}
     fresh_query = select(SkillNode)
-    if latest_domain is not None:
-        fresh_query = fresh_query.where(SkillNode.domain_id == latest_domain.id)
+    if active_domain is not None:
+        fresh_query = fresh_query.where(SkillNode.domain_id == active_domain.id)
     if seen_skill_ids:
         fresh_query = fresh_query.where(SkillNode.id.not_in(seen_skill_ids))
 

@@ -7,9 +7,12 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import settings
+from app.services.content_parser import ExtractedContent, ExtractedImage
 
 
 UNKNOWN_OPTION = "我不会"
+MAX_SEGMENT_CHARS = 2500
+MAX_SEGMENT_IMAGES = 8
 
 
 class CourseGenerationError(RuntimeError):
@@ -72,91 +75,235 @@ class GeneratedDomainPack(BaseModel):
         return skills
 
 
-def generate_course_pack(*, source_text: str, filename: str) -> GeneratedDomainPack:
+def generate_course_pack(
+    *,
+    source_text: str | None = None,
+    content: ExtractedContent | None = None,
+    filename: str,
+    course_name: str | None = None,
+    progress_callback: Any | None = None,
+) -> GeneratedDomainPack:
     if settings.ai_provider.lower() != "openai":
         raise CourseGenerationError("AI_PROVIDER=openai is required for course generation.")
     if not settings.openai_api_key:
         raise CourseGenerationError("OPENAI_API_KEY is required for course generation.")
     if not settings.openai_model:
         raise CourseGenerationError("OPENAI_MODEL is required for course generation.")
-    if len(source_text.strip()) < 80:
+    extracted = content or ExtractedContent(text=source_text or "", pages=[], images=[])
+    if len(extracted.text.strip()) < 80:
         raise CourseGenerationError("The uploaded file does not contain enough extractable text.")
 
-    markdown = _generate_text(_build_prompt(source_text=source_text, filename=filename))
-    try:
-        return _parse_course_markdown(markdown)
-    except CourseGenerationError:
-        repaired = _generate_text(_build_repair_prompt(markdown))
-        return _parse_course_markdown(repaired)
+    segments = _build_segments(extracted)
+    if progress_callback:
+        progress_callback(total=len(segments), processed=0, step="已解析文件，开始分段生成")
+
+    packs: list[GeneratedDomainPack] = []
+    context_summary = ""
+    for index, segment in enumerate(segments, start=1):
+        if progress_callback:
+            progress_callback(total=len(segments), processed=index - 1, step=f"正在生成第 {index}/{len(segments)} 段")
+        markdown = _generate_text(
+            _build_segment_prompt(
+                segment=segment,
+                filename=filename,
+                course_name=course_name,
+                index=index,
+                total=len(segments),
+                previous_context=context_summary,
+            ),
+            images=segment.images,
+        )
+        markdown = _ensure_course_header(markdown, course_name=course_name)
+        try:
+            pack = _parse_course_markdown(markdown)
+        except CourseGenerationError:
+            repaired = _generate_text(_build_repair_prompt(markdown))
+            pack = _parse_course_markdown(_ensure_course_header(repaired, course_name=course_name))
+        packs.append(pack)
+        context_summary = _summarize_generated_context(packs)
+        if progress_callback:
+            progress_callback(total=len(segments), processed=index, step=f"已完成第 {index}/{len(segments)} 段")
+
+    if progress_callback:
+        progress_callback(total=len(segments), processed=len(segments), step="正在合并课程节点")
+    return _merge_segment_packs(packs, course_name=course_name)
 
 
-def _generate_text(prompt: str) -> str:
+def _generate_text(prompt: str, *, images: list[ExtractedImage] | None = None) -> str:
     base_url = settings.openai_base_url.rstrip("/")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
     }
 
-    response_error: Exception | None = None
     try:
-        response = httpx.post(
-            f"{base_url}/responses",
-            headers=headers,
-            json={"model": settings.openai_model, "input": prompt},
-            timeout=180,
-        )
-        if response.status_code != 404:
-            response.raise_for_status()
-            return _extract_responses_text(response.json())
-        response_error = httpx.HTTPStatusError("Responses endpoint returned 404", request=response.request, response=response)
-    except httpx.HTTPError as exc:
-        response_error = exc
-
-    try:
-        response = httpx.post(
-            f"{base_url}/chat/completions",
-            headers=headers,
-            json={
-                "model": settings.openai_model,
-                "messages": [
-                    {"role": "system", "content": "你是课程生成器。请只输出 Markdown，不要输出 JSON。"},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.2,
-            },
-            timeout=180,
-        )
-        response.raise_for_status()
+        response = _post_chat_completion(base_url=base_url, headers=headers, prompt=prompt, images=images or [])
         return _extract_chat_text(response.json())
     except httpx.HTTPError as exc:
-        detail = f"Responses error: {response_error}; chat/completions error: {exc}"
-        raise CourseGenerationError(f"OpenAI generation failed: {detail}") from exc
+        raise CourseGenerationError(f"OpenAI generation failed: chat/completions error: {_http_error_detail(exc)}") from exc
 
 
-def _build_prompt(*, source_text: str, filename: str) -> str:
+def _post_chat_completion(
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    prompt: str,
+    images: list[ExtractedImage],
+) -> httpx.Response:
+    response = httpx.post(
+        f"{base_url}/chat/completions",
+        headers=headers,
+        json={
+            "model": settings.openai_model,
+            "messages": [
+                {"role": "system", "content": "你是课程生成器。请只输出 Markdown，不要输出 JSON。"},
+                {"role": "user", "content": _chat_content(prompt, images)},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 4000,
+        },
+        timeout=180,
+    )
+    response.raise_for_status()
+    return response
+
+
+def _http_error_detail(error: Exception | None) -> str:
+    if error is None:
+        return "none"
+    if isinstance(error, httpx.HTTPStatusError):
+        body = error.response.text[:1000] if error.response is not None else ""
+        return f"{error} body={body}"
+    return str(error)
+
+
+def _responses_payload(prompt: str, images: list[ExtractedImage]) -> dict[str, Any]:
+    if not images:
+        return {"model": settings.openai_model, "input": prompt}
+    content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+    for image in images:
+        content.append({"type": "input_image", "image_url": image.data_url})
+    return {"model": settings.openai_model, "input": [{"role": "user", "content": content}]}
+
+
+def _chat_content(prompt: str, images: list[ExtractedImage]) -> str | list[dict[str, Any]]:
+    if not images:
+        return prompt
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for image in images:
+        content.append({"type": "image_url", "image_url": {"url": image.data_url, "detail": "low"}})
+    return content
+
+
+class CourseSegment(BaseModel):
+    index: int
+    text: str
+    pages: list[int] = Field(default_factory=list)
+    images: list[ExtractedImage] = Field(default_factory=list)
+
+
+def _build_segments(content: ExtractedContent) -> list[CourseSegment]:
+    if content.pages:
+        segments: list[CourseSegment] = []
+        current_parts: list[str] = []
+        current_pages: list[int] = []
+        current_images: list[ExtractedImage] = []
+
+        def flush() -> None:
+            nonlocal current_parts, current_pages, current_images
+            if not current_parts:
+                return
+            segments.append(
+                CourseSegment(
+                    index=len(segments) + 1,
+                    text="\n\n".join(current_parts),
+                    pages=current_pages,
+                    images=current_images,
+                )
+            )
+            current_parts = []
+            current_pages = []
+            current_images = []
+
+        for page in content.pages:
+            page_text = f"[第{page.page_number}页]\n{page.text}".strip()
+            if not page_text:
+                if page.images:
+                    if current_parts and len(current_images) + len(page.images) > MAX_SEGMENT_IMAGES:
+                        flush()
+                    current_pages.append(page.page_number)
+                    current_images.extend(page.images)
+                continue
+            current_text_length = sum(len(part) for part in current_parts)
+            next_image_count = len(current_images) + len(page.images)
+            if current_parts and (
+                current_text_length + len(page_text) > MAX_SEGMENT_CHARS
+                or next_image_count > MAX_SEGMENT_IMAGES
+            ):
+                flush()
+            current_parts.append(page_text)
+            current_pages.append(page.page_number)
+            current_images.extend(page.images)
+        flush()
+        return segments or [CourseSegment(index=1, text=content.text, images=content.images)]
+
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content.text) if part.strip()]
+    segments: list[CourseSegment] = []
+    current: list[str] = []
+    for paragraph in paragraphs:
+        if current and sum(len(part) for part in current) + len(paragraph) > MAX_SEGMENT_CHARS:
+            segments.append(CourseSegment(index=len(segments) + 1, text="\n\n".join(current)))
+            current = []
+        current.append(paragraph)
+    if current:
+        segments.append(CourseSegment(index=len(segments) + 1, text="\n\n".join(current)))
+    return segments or [CourseSegment(index=1, text=content.text[:MAX_SEGMENT_CHARS])]
+
+
+def _build_segment_prompt(
+    *,
+    segment: CourseSegment,
+    filename: str,
+    course_name: str | None,
+    index: int,
+    total: int,
+    previous_context: str,
+) -> str:
     today = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    excerpt = source_text[:40000]
-    truncated_note = "\n材料较长，下面给出 PDF 目录和前 40000 字符。请优先依据目录决定完整课程路线，再用正文补充讲解与题目。" if len(source_text) > len(excerpt) else ""
+    image_note = _image_note(segment.images)
+    context_note = previous_context or "这是第一段，暂无前文生成摘要。"
+    name_hint = course_name or "课程包名称"
     return f"""
 你是一个移动端碎片化学习课程设计器。请把用户上传的材料生成一个可直接发布的课程包。
 
 文件名：{filename}
+目标课程名称：{name_hint}
 默认 slug 前缀：upload_{today}
-{truncated_note}
+当前材料段：第 {index}/{total} 段
+当前段覆盖页码：{', '.join(str(page) for page in segment.pages) if segment.pages else '未提供页码'}
+
+前文生成摘要：
+{context_note}
+
+图片说明：
+{image_note}
 
 重要要求：
 - 只输出 Markdown，不要输出 JSON。
-- 课程节点数量由材料内容决定：材料短就少，材料长就多；不要固定成 9 节或 12 节。
+- 你现在只处理整篇材料中的第 {index}/{total} 段，要和前文摘要衔接，不要重复前面已经生成过的课程节点。
+- 本段如果包含图片，图片已经作为多模态输入提供给你；请结合图片内容生成讲解、要点和题目，并在相关讲解中说明图片来自哪一页。
+- 课程节点数量由当前段内容决定：内容少就少，内容多就多；不要固定成 9 节或 12 节。
+- 当前段通常生成 2 到 4 个高质量课程节点即可；只有当本段确实包含多个独立大主题时才超过 4 个。
 - 题目数量由每节内容决定：每节至少 1 道，重点章节可以有多道。
 - 每个节点包含 1 段讲解和若干要点。
-- 每道题必须有选项“{UNKNOWN_OPTION}”，且“{UNKNOWN_OPTION}”不能是正确答案。
+- 每道题必须有选项“{UNKNOWN_OPTION}”，且“{UNKNOWN_OPTION}”不能是正确答案；如果无法判断正确答案，请重写题目，不要把“{UNKNOWN_OPTION}”设为答案。
 - slug 只能使用小写英文、数字、下划线。
 - prerequisites 只能引用前面已经出现过的 skill slug。
 - 内容要面向初学者，避免投资建议和交易指令，只讲概念、方法和风险边界。
 
 请严格使用下面的 Markdown 模板：
 
-# 课程包名称
+# {name_hint}
 
 slug: upload_{today}
 version: 0.1.0
@@ -195,9 +342,64 @@ C. {UNKNOWN_OPTION}
 
 材料正文：
 <<<MATERIAL_START
-{excerpt}
+{segment.text}
 MATERIAL_END>>>
 """.strip()
+
+
+def _image_note(images: list[ExtractedImage]) -> str:
+    if not images:
+        return "本段没有从 PDF 中提取到图片。"
+    return "\n".join(
+        f"- 图片 {index}: 来自 PDF 第 {image.page_number} 页，文件名 {image.name}，已作为图片输入提供。"
+        for index, image in enumerate(images, start=1)
+    )
+
+
+def _summarize_generated_context(packs: list[GeneratedDomainPack]) -> str:
+    skills = [skill for pack in packs for skill in sorted(pack.skills, key=lambda item: item.order_index)]
+    lines = [f"- {skill.slug}: {skill.title}，{skill.summary}" for skill in skills[-20:]]
+    return "\n".join(lines)
+
+
+def _merge_segment_packs(packs: list[GeneratedDomainPack], *, course_name: str | None) -> GeneratedDomainPack:
+    if not packs:
+        raise CourseGenerationError("No course segments were generated.")
+    base = packs[0]
+    merged_skills: list[GeneratedSkill] = []
+    seen: set[str] = set()
+    for pack in packs:
+        for skill in sorted(pack.skills, key=lambda item: item.order_index):
+            slug = skill.slug
+            if slug in seen:
+                slug = _unique_slug(slug, seen)
+            seen.add(slug)
+            prereqs = [item for item in skill.prerequisites if item in seen]
+            merged_skills.append(
+                skill.model_copy(
+                    update={
+                        "slug": slug,
+                        "order_index": len(merged_skills) + 1,
+                        "prerequisites": prereqs,
+                    }
+                )
+            )
+    return GeneratedDomainPack(
+        slug=base.slug,
+        name=course_name or base.name,
+        version=base.version,
+        description=base.description,
+        skills=merged_skills,
+    )
+
+
+def _unique_slug(slug: str, seen: set[str]) -> str:
+    index = 2
+    candidate = f"{slug}_{index}"
+    while candidate in seen:
+        index += 1
+        candidate = f"{slug}_{index}"
+    return candidate
 
 
 def _build_repair_prompt(markdown: str) -> str:
@@ -214,6 +416,17 @@ def _build_repair_prompt(markdown: str) -> str:
 待修复 Markdown：
 {markdown[:60000]}
 """.strip()
+
+
+def _ensure_course_header(markdown: str, *, course_name: str | None) -> str:
+    text = _strip_markdown_fence(markdown)
+    if re.search(r"^#\s+.+?$", text, flags=re.MULTILINE):
+        return text
+    if not re.search(r"^##\s+", text, flags=re.MULTILINE):
+        return text
+    slug = f"upload_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    name = course_name or "课程包"
+    return f"# {name}\n\nslug: {slug}\nversion: 0.1.0\ndescription: {name}\n\n{text}".strip()
 
 
 def _parse_course_markdown(markdown: str) -> GeneratedDomainPack:
@@ -315,7 +528,7 @@ def _parse_questions(text: str) -> list[GeneratedQuestion]:
         block = text[match.start():end].strip()
         try:
             questions.append(_parse_question(block))
-        except CourseGenerationError:
+        except (CourseGenerationError, ValueError):
             continue
     if not questions:
         raise CourseGenerationError("Skill has no complete questions.")

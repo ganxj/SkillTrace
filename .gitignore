@@ -18,5 +18,6 @@ out/
 build/
 .dart_tool/
 .flutter-plugins
+.tmp_pdf_images
 .flutter-plugins-dependencies
 postgres_data/

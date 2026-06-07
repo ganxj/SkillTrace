@@ -140,6 +140,9 @@ class ContentImport(Base):
     generated_json: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str] = mapped_column(Text, default="")
     domain_id: Mapped[str | None] = mapped_column(ForeignKey("domain_packs.id"), nullable=True)
+    total_segments: Mapped[int] = mapped_column(Integer, default=0)
+    processed_segments: Mapped[int] = mapped_column(Integer, default=0)
+    current_step: Mapped[str] = mapped_column(String(260), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

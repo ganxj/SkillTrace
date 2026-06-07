@@ -28,8 +28,11 @@ class ApiClient {
     return data.map((item) => DomainPack.fromJson(item)).toList();
   }
 
-  Future<List<ReviewItem>> getNextReview() async {
-    final data = await _getList('/review/next?limit=5');
+  Future<List<ReviewItem>> getNextReview({String? domainSlug}) async {
+    final query = domainSlug == null
+        ? 'limit=5'
+        : 'limit=5&domain_slug=${Uri.encodeQueryComponent(domainSlug)}';
+    final data = await _getList('/review/next?$query');
     return data.map((item) => ReviewItem.fromJson(item)).toList();
   }
 

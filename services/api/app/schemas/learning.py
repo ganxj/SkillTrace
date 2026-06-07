@@ -13,6 +13,11 @@ class DomainPackRead(BaseModel):
     description: str
 
 
+class DomainPackCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    description: str = ""
+
+
 class QuizQuestionRead(BaseModel):
     prompt: str
     options: list[str]
@@ -133,6 +138,9 @@ class ContentImportRead(BaseModel):
     status: str
     error: str
     domain_id: str | None
+    total_segments: int = 0
+    processed_segments: int = 0
+    current_step: str = ""
     created_at: datetime
     completed_at: datetime | None
     domain: DomainPackRead | None = None

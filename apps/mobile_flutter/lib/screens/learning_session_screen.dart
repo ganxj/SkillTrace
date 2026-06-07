@@ -259,7 +259,8 @@ class _LearningSessionScreenState extends State<LearningSessionScreen> {
           _message = '已记录，继续下一题。';
         });
       } else {
-        setState(() => _message = '已记录。本节学习进度和复习时间已更新。');
+        if (!mounted) return;
+        Navigator.of(context).pop(true);
       }
     } catch (error) {
       setState(() => _message = '提交失败：$error');

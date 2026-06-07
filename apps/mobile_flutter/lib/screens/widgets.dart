@@ -40,12 +40,14 @@ class SkillCard extends StatelessWidget {
     super.key,
     required this.skill,
     this.reason,
+    this.statusLabel,
     this.actionLabel = '进入',
     this.onTap,
   });
 
   final Skill skill;
   final String? reason;
+  final String? statusLabel;
   final String actionLabel;
   final VoidCallback? onTap;
 
@@ -84,13 +86,59 @@ class SkillCard extends StatelessWidget {
                     style: const TextStyle(color: Colors.brown)),
               ],
               const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.tonalIcon(
-                  onPressed: onTap,
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: Text(actionLabel),
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (statusLabel != null)
+                    _StatusBadge(label: statusLabel!)
+                  else
+                    const Spacer(),
+                  const SizedBox(width: 10),
+                  FilledButton.tonalIcon(
+                    onPressed: onTap,
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: Text(actionLabel),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (label) {
+      '已学' => const Color(0xFF206B59),
+      '当前' => Theme.of(context).colorScheme.primary,
+      _ => Colors.black54,
+    };
+    return Expanded(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.flag_outlined, size: 16, color: color),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(color: color, fontWeight: FontWeight.w700),
               ),
             ],
           ),

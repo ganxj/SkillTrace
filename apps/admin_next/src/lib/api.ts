@@ -46,6 +46,9 @@ export type ContentImport = {
   status: string;
   error: string;
   domain_id: string | null;
+  total_segments: number;
+  processed_segments: number;
+  current_step: string;
   created_at: string;
   completed_at: string | null;
   domain: DomainPack | null;
@@ -92,9 +95,9 @@ async function fetchJson<T>(path: string): Promise<T> {
 
 export async function getDashboardData() {
   const domains = await fetchJson<DomainPack[]>("/domains");
-  const latestDomain = await fetchJson<DomainPack>("/domains/latest");
+  const latestDomain = domains.length === 0 ? null : await fetchJson<DomainPack>("/domains/latest");
   const [skills, states, evidence, imports] = await Promise.all([
-    fetchJson<Skill[]>(`/skills?domain_slug=${latestDomain.slug}`),
+    latestDomain ? fetchJson<Skill[]>(`/skills?domain_slug=${latestDomain.slug}`) : Promise.resolve([]),
     fetchJson<LearnerState[]>("/learner/state"),
     fetchJson<Evidence[]>("/evidence?limit=12"),
     fetchJson<ContentImport[]>("/imports")
