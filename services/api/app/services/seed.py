@@ -9,6 +9,8 @@ from app.models import DomainPack, SkillEdge, SkillNode
 
 ROOT_DIR = Path(__file__).resolve().parents[4]
 DOMAIN_PACKS_DIR = ROOT_DIR / "domain_packs"
+if not DOMAIN_PACKS_DIR.exists():
+    DOMAIN_PACKS_DIR = Path(__file__).resolve().parents[2] / "domain_packs"
 
 
 def seed_domain_packs() -> None:

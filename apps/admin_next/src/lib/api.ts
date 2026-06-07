@@ -1,9 +1,10 @@
 export const API_BASE_URL =
   typeof window === "undefined"
     ? process.env.API_INTERNAL_BASE_URL ??
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/v1` : undefined) ??
       process.env.NEXT_PUBLIC_API_BASE_URL ??
       "http://192.168.1.192:8001/api/v1"
-    : process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://192.168.1.192:8001/api/v1";
+    : process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 
 export type DomainPack = {
   id: string;
