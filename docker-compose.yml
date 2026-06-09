@@ -1,32 +1,12 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: ai_learning_os_postgres
-    environment:
-      POSTGRES_DB: ai_learning_os
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_learning_os"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   api:
     build:
       context: .
       dockerfile: services/api/Dockerfile
     container_name: ai_learning_os_api
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       APP_ENV: production
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/ai_learning_os
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@192.168.1.49:5432/ai_learning_os}
       SEED_DOMAIN_PACKS: "true"
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -57,6 +37,3 @@ services:
       API_INTERNAL_BASE_URL: http://api:8000/api/v1
     ports:
       - "3000:3000"
-
-volumes:
-  postgres_data:
