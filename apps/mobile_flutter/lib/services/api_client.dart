@@ -6,7 +6,7 @@ import '../models/learning_models.dart';
 
 class ApiClient {
   ApiClient({
-    this.baseUrl = 'http://192.168.1.192:8001/api/v1',
+    this.baseUrl = 'http://gxj.daxiangzhuan.com:38898/api/v1',
     this.userId = 'demo-user',
   });
 
