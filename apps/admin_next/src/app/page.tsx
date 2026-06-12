@@ -20,7 +20,7 @@ export default async function Home() {
         <section className="panel">
           <h2>无法连接后端服务</h2>
           <p className="muted">
-            请先启动 FastAPI 服务：http://192.168.1.192:8001/api/v1，然后刷新页面。
+            请先启动 FastAPI 服务，然后刷新页面。
           </p>
           <pre>{error instanceof Error ? error.message : "Unknown error"}</pre>
         </section>
