@@ -1,6 +1,7 @@
 FROM node:22-alpine AS deps
 
 WORKDIR /app
+ENV NPM_CONFIG_CACHE=/tmp/.npm
 
 COPY apps/admin_next/package.json apps/admin_next/package-lock.json ./
 RUN npm ci
@@ -10,11 +11,14 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_BASE_URL=/api/v1
-ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
+    NEXT_TELEMETRY_DISABLED=1 \
+    NPM_CONFIG_CACHE=/tmp/.npm
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY apps/admin_next ./
-RUN npx next build --webpack
+RUN mkdir -p .next/cache /tmp/.npm && chmod -R 777 .next /tmp/.npm
+RUN ./node_modules/.bin/next build --webpack
 
 FROM node:22-alpine AS runner
 

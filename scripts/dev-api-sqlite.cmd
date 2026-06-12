@@ -5,9 +5,16 @@ set "API_DIR=%ROOT%\services\api"
 set "DATABASE_URL=sqlite:///%API_DIR:\=/%/.local_dev.db"
 set "SEED_DOMAIN_PACKS=true"
 cd /d "%API_DIR%"
-if not exist ".venv\Scripts\uvicorn.exe" (
-  echo Missing API virtualenv. Run install first:
-  echo services\api\.venv\Scripts\pip.exe install -r services\api\requirements.txt
+call conda activate py3_11
+if errorlevel 1 (
+  echo Failed to activate conda environment py3_11.
+  echo Make sure Conda is initialized for cmd.exe and the py3_11 environment exists.
   exit /b 1
 )
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 192.168.1.192 --port 8001
+python -c "import fastapi, sqlalchemy, pydantic, pydantic_settings, httpx, psycopg, alembic, uvicorn" >nul 2>nul
+if errorlevel 1 (
+  echo Installing API dependencies into conda environment py3_11...
+  python -m pip install -r requirements.txt
+  if errorlevel 1 exit /b 1
+)
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
