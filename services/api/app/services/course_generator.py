@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import re
 from time import sleep
@@ -12,7 +14,7 @@ from app.services.content_parser import ExtractedContent, ExtractedImage
 
 
 UNKNOWN_OPTION = "我不会"
-MAX_SEGMENT_CHARS = 1200
+MAX_SEGMENT_CHARS = 1800
 MAX_SEGMENT_IMAGES = 2
 MAX_AI_ATTEMPTS = 3
 
@@ -114,6 +116,7 @@ def generate_course_pack(
         )
         pack = _generate_segment_pack(
             prompt=prompt,
+            segment=segment,
             images=segment.images,
             course_name=course_name,
             segment_index=index,
@@ -177,6 +180,7 @@ def _generate_text(
 def _generate_segment_pack(
     *,
     prompt: str,
+    segment: CourseSegment,
     images: list[ExtractedImage],
     course_name: str | None,
     segment_index: int,
@@ -216,10 +220,18 @@ def _generate_segment_pack(
                     ),
                 )
 
-    snippet = _strip_markdown_fence(markdown)[:800]
-    raise CourseGenerationError(
-        f"Generated Markdown for segment {segment_index}/{segment_total} is still invalid "
-        f"after {MAX_AI_ATTEMPTS} format attempts: {last_error}. Last output: {snippet}"
+    if progress_callback:
+        progress_callback(
+            total=segment_total,
+            processed=segment_index - 1,
+            step=f"第 {segment_index}/{segment_total} 段多次生成跑偏，使用保底课程节点继续生成",
+        )
+    return _fallback_segment_pack(
+        segment=segment,
+        course_name=course_name,
+        segment_index=segment_index,
+        parse_error=str(last_error) if last_error else "",
+        model_output=markdown,
     )
 
 
@@ -246,6 +258,64 @@ def _post_chat_completion(
     )
     response.raise_for_status()
     return response
+
+
+def _fallback_segment_pack(
+    *,
+    segment: CourseSegment,
+    course_name: str | None,
+    segment_index: int,
+    parse_error: str,
+    model_output: str,
+) -> GeneratedDomainPack:
+    title = _fallback_title(segment.text, segment_index)
+    slug_base = f"fallback_{segment_index}_{_slugify(title)}"
+    excerpt = _compact_excerpt(segment.text, 900)
+    lesson = (
+        f"本节来自上传材料第 {segment_index} 个片段。模型未能稳定生成完整 Markdown，"
+        f"系统已保留该片段的核心内容并整理为可复习的学习节点。\n\n"
+        f"材料摘录：\n{excerpt}"
+    )
+    if parse_error:
+        lesson += f"\n\n生成修复提示：{parse_error[:300]}"
+    if model_output:
+        lesson += f"\n\n模型最后一次输出摘录：{_compact_excerpt(model_output, 300)}"
+
+    skill = GeneratedSkill(
+        slug=_clean_slug(slug_base),
+        title=title,
+        summary=f"理解材料片段 {segment_index} 中的关键规范、示例和边界。",
+        kind="concept",
+        difficulty=2,
+        estimated_minutes=6,
+        order_index=1,
+        prerequisites=[],
+        lesson_explain=lesson,
+        key_points=[
+            "先识别材料片段中的规则、示例和例外情况。",
+            "代码示例应服务于规范理解，不应只记忆输出结果。",
+            "遇到边界条件时，要回到原文语境判断适用范围。",
+        ],
+        questions=[
+            GeneratedQuestion(
+                prompt="学习这类规范材料时，最稳妥的做法是什么？",
+                options=[
+                    "只记住代码片段的输出结果",
+                    "结合原文语境理解规则、示例和边界条件",
+                    UNKNOWN_OPTION,
+                ],
+                correct_index=1,
+                explanation="规范类内容需要理解适用场景和边界，不能只背单个示例。",
+            )
+        ],
+    )
+    return GeneratedDomainPack(
+        slug=f"fallback_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{segment_index}",
+        name=course_name or "上传课程",
+        version="0.1.0",
+        description="由上传材料生成的课程片段。",
+        skills=[skill],
+    )
 
 
 def _http_error_detail(error: Exception | None) -> str:
@@ -364,7 +434,7 @@ def _split_text_chunks(text: str) -> list[str]:
         return []
     chunks: list[str] = []
     current = ""
-    sentences = [item.strip() for item in re.split(r"(?<=[。！？.!?；;])\s+", text) if item.strip()]
+    sentences = [item.strip() for item in re.split(r"(?<=[。！？.!?；])\s+", text) if item.strip()]
     if len(sentences) <= 1:
         sentences = [text[index : index + MAX_SEGMENT_CHARS] for index in range(0, len(text), MAX_SEGMENT_CHARS)]
     for sentence in sentences:
@@ -382,6 +452,25 @@ def _split_text_chunks(text: str) -> list[str]:
     if current:
         chunks.append(current.strip())
     return chunks
+
+
+def _fallback_title(text: str, segment_index: int) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines:
+        cleaned = re.sub(r"^[#\-\*\d\.\s]+", "", line).strip()
+        if 4 <= len(cleaned) <= 60 and not _looks_like_code(cleaned):
+            return cleaned[:60]
+    return f"材料片段 {segment_index} 的规范要点"
+
+
+def _compact_excerpt(text: str, limit: int) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    return cleaned[:limit] + ("..." if len(cleaned) > limit else "")
+
+
+def _looks_like_code(text: str) -> bool:
+    code_markers = (";", "{", "}", "()", "String ", "public ", "class ", "System.out", "return ")
+    return any(marker in text for marker in code_markers)
 
 
 def _build_segment_prompt(
