@@ -148,6 +148,6 @@ class ContentImportRead(BaseModel):
 
 class ContentImportCreateRead(BaseModel):
     import_record: ContentImportRead
-    domain: DomainPackRead
+    domain: DomainPackRead | None
     skill_count: int
     question_count: int

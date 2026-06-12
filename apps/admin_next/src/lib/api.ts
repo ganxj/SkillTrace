@@ -94,9 +94,28 @@ async function fetchJson<T>(path: string): Promise<T> {
     cache: "no-store"
   });
   if (!response.ok) {
-    throw new Error(`API ${path} failed with ${response.status}`);
+    throw new Error(await apiErrorMessage(response, `API ${path} failed`));
   }
-  return response.json() as Promise<T>;
+  return readApiJson<T>(response);
+}
+
+export async function readApiJson<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`API returned non-JSON response (${response.status}): ${text.slice(0, 300)}`);
+  }
+}
+
+export async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await readApiJson<{ detail?: string }>(response);
+    return payload.detail ?? `${fallback}: ${response.status}`;
+  } catch (error) {
+    return error instanceof Error ? error.message : `${fallback}: ${response.status}`;
+  }
 }
 
 export async function getDashboardData() {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, apiErrorMessage, readApiJson } from "@/lib/api";
 import type { ContentImport, CourseSummary, DomainPack, Evidence, LearnerState, Skill } from "@/lib/api";
 
 type DashboardProps = {
@@ -132,7 +132,7 @@ function OverviewPanel({ domains, latestDomain, skills, states, imports }: Dashb
 
 type ImportResult = {
   import_record: ContentImport;
-  domain: { id: string; name: string; slug: string };
+  domain: { id: string; name: string; slug: string } | null;
   skill_count: number;
   question_count: number;
 };
@@ -142,6 +142,7 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
   const [newCourseName, setNewCourseName] = useState("");
   const [creating, setCreating] = useState(false);
   const [generatingDomainId, setGeneratingDomainId] = useState<string | null>(null);
+  const [activeImportId, setActiveImportId] = useState<string | null>(null);
   const [modalDomain, setModalDomain] = useState<DomainPack | null>(null);
   const [activeImport, setActiveImport] = useState<ContentImport | null>(null);
   const [message, setMessage] = useState("");
@@ -150,22 +151,31 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
     if (!generatingDomainId) return;
     const timer = window.setInterval(async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/imports`, { cache: "no-store" });
-        if (!response.ok) return;
-        const latestImports = (await response.json()) as ContentImport[];
-        const latest = latestImports.find(
-          (item) =>
-            item.domain_id === generatingDomainId &&
-            item.status !== "published" &&
-            item.status !== "failed"
+        const response = await fetch(
+          activeImportId ? `${API_BASE_URL}/imports/${activeImportId}` : `${API_BASE_URL}/imports`,
+          { cache: "no-store" }
         );
+        if (!response.ok) return;
+        const latest = activeImportId
+          ? await readApiJson<ContentImport>(response)
+          : (await readApiJson<ContentImport[]>(response)).find((item) => item.domain_id === generatingDomainId);
         if (latest) setActiveImport(latest);
       } catch {
         // Progress polling is best-effort while the upload request is open.
       }
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [generatingDomainId]);
+  }, [activeImportId, generatingDomainId]);
+
+  useEffect(() => {
+    if (!activeImport || !["published", "failed"].includes(activeImport.status)) return;
+    setGeneratingDomainId(null);
+    if (activeImport.status === "published") {
+      setMessage("课程生成完成，刷新页面后可查看最新章节和题目。");
+    } else {
+      setMessage(activeImport.error || "课程生成失败。");
+    }
+  }, [activeImport]);
 
   async function createCourse() {
     const name = newCourseName.trim();
@@ -181,8 +191,8 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? "创建课程失败。");
+      const payload = await readApiJson<{ detail?: string }>(response);
+      if (!response.ok) throw new Error(payload.detail ?? `创建课程失败：${response.status}`);
       window.location.reload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "创建课程失败。");
@@ -196,8 +206,7 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
     if (!ok) return;
     const response = await fetch(`${API_BASE_URL}/domains/${domain.id}`, { method: "DELETE" });
     if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      window.alert(payload.detail ?? "删除课程失败。");
+      window.alert(await apiErrorMessage(response, "删除课程失败"));
       return;
     }
     window.location.reload();
@@ -213,6 +222,7 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
     }
 
     setGeneratingDomainId(targetDomain.id);
+    setActiveImportId(null);
     setActiveImport(null);
     setModalDomain(null);
     setMessage(`正在为「${targetDomain.name}」生成课程...`);
@@ -220,32 +230,38 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
     form.append("file", file);
     form.append("domain_id", targetDomain.id);
 
+    let started = false;
     try {
       const response = await fetch(`${API_BASE_URL}/imports`, {
         method: "POST",
         body: form
       });
-      const payload = await response.json();
+      const payload = await readApiJson<ImportResult & { detail?: string }>(response);
       if (!response.ok) throw new Error(payload.detail ?? `生成失败：${response.status}`);
-      setActiveImport((payload as ImportResult).import_record);
-      setMessage(`「${targetDomain.name}」已生成 ${(payload as ImportResult).skill_count} 节课。`);
-      window.location.reload();
+      const result = payload as ImportResult;
+      setActiveImport(result.import_record);
+      setActiveImportId(result.import_record.id);
+      started = true;
+      setMessage(`「${targetDomain.name}」已开始生成，正在解析文件和计算总段数。`);
     } catch (error) {
       try {
         const response = await fetch(`${API_BASE_URL}/imports`, { cache: "no-store" });
         if (response.ok) {
-          const latestImports = (await response.json()) as ContentImport[];
+          const latestImports = await readApiJson<ContentImport[]>(response);
           const latestFailed = latestImports.find(
             (item) => item.domain_id === targetDomain.id && item.status === "failed"
           );
-          if (latestFailed) setActiveImport(latestFailed);
+          if (latestFailed) {
+            setActiveImport(latestFailed);
+            setActiveImportId(latestFailed.id);
+          }
         }
       } catch {
         // The submit error below is the source of truth.
       }
       setMessage(error instanceof Error ? error.message : "生成失败。");
     } finally {
-      setGeneratingDomainId(null);
+      if (!started) setGeneratingDomainId(null);
     }
   }
 

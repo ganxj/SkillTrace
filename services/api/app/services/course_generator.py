@@ -1,5 +1,6 @@
 import json
 import re
+from time import sleep
 from datetime import datetime
 from typing import Any
 
@@ -11,8 +12,9 @@ from app.services.content_parser import ExtractedContent, ExtractedImage
 
 
 UNKNOWN_OPTION = "我不会"
-MAX_SEGMENT_CHARS = 2500
-MAX_SEGMENT_IMAGES = 8
+MAX_SEGMENT_CHARS = 1200
+MAX_SEGMENT_IMAGES = 2
+MAX_AI_ATTEMPTS = 3
 
 
 class CourseGenerationError(RuntimeError):
@@ -102,23 +104,22 @@ def generate_course_pack(
     for index, segment in enumerate(segments, start=1):
         if progress_callback:
             progress_callback(total=len(segments), processed=index - 1, step=f"正在生成第 {index}/{len(segments)} 段")
-        markdown = _generate_text(
-            _build_segment_prompt(
-                segment=segment,
-                filename=filename,
-                course_name=course_name,
-                index=index,
-                total=len(segments),
-                previous_context=context_summary,
-            ),
-            images=segment.images,
+        prompt = _build_segment_prompt(
+            segment=segment,
+            filename=filename,
+            course_name=course_name,
+            index=index,
+            total=len(segments),
+            previous_context=context_summary,
         )
-        markdown = _ensure_course_header(markdown, course_name=course_name)
-        try:
-            pack = _parse_course_markdown(markdown)
-        except CourseGenerationError:
-            repaired = _generate_text(_build_repair_prompt(markdown))
-            pack = _parse_course_markdown(_ensure_course_header(repaired, course_name=course_name))
+        pack = _generate_segment_pack(
+            prompt=prompt,
+            images=segment.images,
+            course_name=course_name,
+            segment_index=index,
+            segment_total=len(segments),
+            progress_callback=progress_callback,
+        )
         packs.append(pack)
         context_summary = _summarize_generated_context(packs)
         if progress_callback:
@@ -129,18 +130,97 @@ def generate_course_pack(
     return _merge_segment_packs(packs, course_name=course_name)
 
 
-def _generate_text(prompt: str, *, images: list[ExtractedImage] | None = None) -> str:
+def _generate_text(
+    prompt: str,
+    *,
+    images: list[ExtractedImage] | None = None,
+    progress_callback: Any | None = None,
+    progress_total: int = 0,
+    progress_processed: int = 0,
+    progress_step: str = "正在请求 AI",
+) -> str:
     base_url = settings.openai_base_url.rstrip("/")
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
     }
 
-    try:
-        response = _post_chat_completion(base_url=base_url, headers=headers, prompt=prompt, images=images or [])
-        return _extract_chat_text(response.json())
-    except httpx.HTTPError as exc:
-        raise CourseGenerationError(f"OpenAI generation failed: chat/completions error: {_http_error_detail(exc)}") from exc
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_AI_ATTEMPTS + 1):
+        if progress_callback:
+            progress_callback(
+                total=progress_total,
+                processed=progress_processed,
+                step=f"{progress_step}，AI 请求第 {attempt}/{MAX_AI_ATTEMPTS} 次",
+            )
+        try:
+            response = _post_chat_completion(base_url=base_url, headers=headers, prompt=prompt, images=images or [])
+            return _extract_chat_text(_response_json(response))
+        except (httpx.HTTPError, CourseGenerationError, ValueError) as exc:
+            last_error = exc
+            if attempt < MAX_AI_ATTEMPTS:
+                if progress_callback:
+                    progress_callback(
+                        total=progress_total,
+                        processed=progress_processed,
+                        step=f"{progress_step}失败，准备重试第 {attempt + 1}/{MAX_AI_ATTEMPTS} 次：{_http_error_detail(exc)}",
+                    )
+                sleep(attempt * 2)
+                continue
+            break
+
+    raise CourseGenerationError(
+        f"OpenAI generation failed after {MAX_AI_ATTEMPTS} attempts: {_http_error_detail(last_error)}"
+    ) from last_error
+
+
+def _generate_segment_pack(
+    *,
+    prompt: str,
+    images: list[ExtractedImage],
+    course_name: str | None,
+    segment_index: int,
+    segment_total: int,
+    progress_callback: Any | None,
+) -> GeneratedDomainPack:
+    markdown = ""
+    last_error: CourseGenerationError | None = None
+    for format_attempt in range(1, MAX_AI_ATTEMPTS + 1):
+        if format_attempt == 1:
+            ai_prompt = prompt
+            step = f"正在生成第 {segment_index}/{segment_total} 段 Markdown"
+        else:
+            ai_prompt = _build_repair_prompt(markdown, str(last_error))
+            step = f"正在修复第 {segment_index}/{segment_total} 段 Markdown 格式，第 {format_attempt}/{MAX_AI_ATTEMPTS} 轮"
+
+        markdown = _generate_text(
+            ai_prompt,
+            images=images if format_attempt == 1 else [],
+            progress_callback=progress_callback,
+            progress_total=segment_total,
+            progress_processed=segment_index - 1,
+            progress_step=step,
+        )
+        markdown = _ensure_course_header(markdown, course_name=course_name)
+        try:
+            return _parse_course_markdown(markdown)
+        except CourseGenerationError as exc:
+            last_error = exc
+            if progress_callback and format_attempt < MAX_AI_ATTEMPTS:
+                progress_callback(
+                    total=segment_total,
+                    processed=segment_index - 1,
+                    step=(
+                        f"第 {segment_index}/{segment_total} 段 Markdown 解析失败，"
+                        f"准备修复第 {format_attempt + 1}/{MAX_AI_ATTEMPTS} 轮：{exc}"
+                    ),
+                )
+
+    snippet = _strip_markdown_fence(markdown)[:800]
+    raise CourseGenerationError(
+        f"Generated Markdown for segment {segment_index}/{segment_total} is still invalid "
+        f"after {MAX_AI_ATTEMPTS} format attempts: {last_error}. Last output: {snippet}"
+    )
 
 
 def _post_chat_completion(
@@ -175,6 +255,17 @@ def _http_error_detail(error: Exception | None) -> str:
         body = error.response.text[:1000] if error.response is not None else ""
         return f"{error} body={body}"
     return str(error)
+
+
+def _response_json(response: httpx.Response) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except ValueError as exc:
+        body = response.text[:1000]
+        raise CourseGenerationError(f"chat/completions returned non-JSON body: {body}") from exc
+    if not isinstance(data, dict):
+        raise CourseGenerationError("chat/completions returned a non-object JSON response.")
+    return data
 
 
 def _responses_payload(prompt: str, images: list[ExtractedImage]) -> dict[str, Any]:
@@ -226,28 +317,35 @@ def _build_segments(content: ExtractedContent) -> list[CourseSegment]:
             current_images = []
 
         for page in content.pages:
-            page_text = f"[第{page.page_number}页]\n{page.text}".strip()
-            if not page_text:
+            page_chunks = _split_text_chunks(page.text)
+            if not page_chunks:
                 if page.images:
                     if current_parts and len(current_images) + len(page.images) > MAX_SEGMENT_IMAGES:
                         flush()
                     current_pages.append(page.page_number)
-                    current_images.extend(page.images)
+                    current_images.extend(page.images[:MAX_SEGMENT_IMAGES])
                 continue
-            current_text_length = sum(len(part) for part in current_parts)
-            next_image_count = len(current_images) + len(page.images)
-            if current_parts and (
-                current_text_length + len(page_text) > MAX_SEGMENT_CHARS
-                or next_image_count > MAX_SEGMENT_IMAGES
-            ):
-                flush()
-            current_parts.append(page_text)
-            current_pages.append(page.page_number)
-            current_images.extend(page.images)
+            for chunk_index, chunk in enumerate(page_chunks, start=1):
+                page_label = f"[第{page.page_number}页"
+                if len(page_chunks) > 1:
+                    page_label += f"，片段{chunk_index}/{len(page_chunks)}"
+                page_text = f"{page_label}]\n{chunk}".strip()
+                current_text_length = sum(len(part) for part in current_parts)
+                chunk_images = page.images[:MAX_SEGMENT_IMAGES] if chunk_index == 1 else []
+                next_image_count = len(current_images) + len(chunk_images)
+                if current_parts and (
+                    current_text_length + len(page_text) > MAX_SEGMENT_CHARS
+                    or next_image_count > MAX_SEGMENT_IMAGES
+                ):
+                    flush()
+                current_parts.append(page_text)
+                if page.page_number not in current_pages:
+                    current_pages.append(page.page_number)
+                current_images.extend(chunk_images)
         flush()
-        return segments or [CourseSegment(index=1, text=content.text, images=content.images)]
+        return segments or [CourseSegment(index=1, text=content.text[:MAX_SEGMENT_CHARS], images=content.images[:MAX_SEGMENT_IMAGES])]
 
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content.text) if part.strip()]
+    paragraphs = [chunk for part in re.split(r"\n\s*\n", content.text) for chunk in _split_text_chunks(part)]
     segments: list[CourseSegment] = []
     current: list[str] = []
     for paragraph in paragraphs:
@@ -258,6 +356,32 @@ def _build_segments(content: ExtractedContent) -> list[CourseSegment]:
     if current:
         segments.append(CourseSegment(index=len(segments) + 1, text="\n\n".join(current)))
     return segments or [CourseSegment(index=1, text=content.text[:MAX_SEGMENT_CHARS])]
+
+
+def _split_text_chunks(text: str) -> list[str]:
+    text = text.strip()
+    if not text:
+        return []
+    chunks: list[str] = []
+    current = ""
+    sentences = [item.strip() for item in re.split(r"(?<=[。！？.!?；;])\s+", text) if item.strip()]
+    if len(sentences) <= 1:
+        sentences = [text[index : index + MAX_SEGMENT_CHARS] for index in range(0, len(text), MAX_SEGMENT_CHARS)]
+    for sentence in sentences:
+        if len(sentence) > MAX_SEGMENT_CHARS:
+            if current:
+                chunks.append(current.strip())
+                current = ""
+            chunks.extend(sentence[index : index + MAX_SEGMENT_CHARS] for index in range(0, len(sentence), MAX_SEGMENT_CHARS))
+            continue
+        if current and len(current) + len(sentence) + 1 > MAX_SEGMENT_CHARS:
+            chunks.append(current.strip())
+            current = sentence
+        else:
+            current = f"{current}\n{sentence}".strip() if current else sentence
+    if current:
+        chunks.append(current.strip())
+    return chunks
 
 
 def _build_segment_prompt(
@@ -290,6 +414,8 @@ def _build_segment_prompt(
 
 重要要求：
 - 只输出 Markdown，不要输出 JSON。
+- 输出第一行必须是 "# {name_hint}"，不要在它前面添加解释、代码、答案或寒暄。
+- 不要直接回答材料中的示例题、代码输出题或练习题；这些内容只能被改写成课程讲解、要点和选择题。
 - 你现在只处理整篇材料中的第 {index}/{total} 段，要和前文摘要衔接，不要重复前面已经生成过的课程节点。
 - 本段如果包含图片，图片已经作为多模态输入提供给你；请结合图片内容生成讲解、要点和题目，并在相关讲解中说明图片来自哪一页。
 - 课程节点数量由当前段内容决定：内容少就少，内容多就多；不要固定成 9 节或 12 节。
@@ -402,16 +528,21 @@ def _unique_slug(slug: str, seen: set[str]) -> str:
     return candidate
 
 
-def _build_repair_prompt(markdown: str) -> str:
+def _build_repair_prompt(markdown: str, parse_error: str = "") -> str:
     return f"""
 下面是一段课程 Markdown，但格式不完全符合模板。请修复它。
 
 要求：
 - 只输出 Markdown，不要输出 JSON。
+- 第一行必须是 "# 课程包名称" 形式的一级标题。
+- 如果待修复内容只是代码、答案、解释片段或普通文本，请不要延续它，必须重写成完整课程 Markdown。
 - 不要新增课程，不要删除课程。
 - 每个课程节点都要有 slug、summary、kind、difficulty、minutes、prerequisites、讲解、要点、选择题。
 - 每道题必须有“{UNKNOWN_OPTION}”选项，且正确答案不能是“{UNKNOWN_OPTION}”。
 - prerequisites 只能引用前面课程的 slug。
+
+解析错误：
+{parse_error or "未提供"}
 
 待修复 Markdown：
 {markdown[:60000]}

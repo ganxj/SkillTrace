@@ -8,6 +8,14 @@ __pycache__/
 .venv/
 *.db
 *.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
+*.log
+*.tmp
+*.tsbuildinfo
+/package-lock.json
 logs/
 .tools/
 .idea/
@@ -21,3 +29,5 @@ build/
 .tmp_pdf_images
 .flutter-plugins-dependencies
 postgres_data/
+.codex/
+tmp/

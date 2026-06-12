@@ -1,11 +1,13 @@
+import asyncio
 import json
 from datetime import datetime
+from io import BytesIO
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models import ContentImport, DomainPack, LearnerSkillState, MasteryEvidence, SkillEdge, SkillNode
 from app.schemas import ContentImportCreateRead, ContentImportRead, DomainPackRead
 from app.services.content_parser import extract_upload_content
@@ -19,8 +21,17 @@ def list_imports(db: Session = Depends(get_db)) -> list[ContentImport]:
     return list(db.scalars(select(ContentImport).order_by(desc(ContentImport.created_at)).limit(20)).all())
 
 
+@router.get("/{import_id}", response_model=ContentImportRead)
+def get_import(import_id: str, db: Session = Depends(get_db)) -> ContentImport:
+    import_record = db.get(ContentImport, import_id)
+    if import_record is None:
+        raise HTTPException(status_code=404, detail="Import not found.")
+    return import_record
+
+
 @router.post("", response_model=ContentImportCreateRead)
 async def create_import(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     domain_id: str | None = Form(default=None),
     db: Session = Depends(get_db),
@@ -41,8 +52,27 @@ async def create_import(
     db.commit()
     db.refresh(import_record)
 
+    file_bytes = await file.read()
+    background_tasks.add_task(_run_import, import_record.id, file_bytes, filename, domain.id if domain else None)
+
+    return ContentImportCreateRead(
+        import_record=ContentImportRead.model_validate(import_record),
+        domain=DomainPackRead.model_validate(domain),
+        skill_count=0,
+        question_count=0,
+    )
+
+
+def _run_import(import_id: str, file_bytes: bytes, filename: str, domain_id: str | None) -> None:
+    db = SessionLocal()
+    import_record: ContentImport | None = None
     try:
-        extracted = await extract_upload_content(file)
+        import_record = db.get(ContentImport, import_id)
+        if import_record is None:
+            return
+        domain = db.get(DomainPack, domain_id) if domain_id else None
+        upload = UploadFile(filename=filename, file=BytesIO(file_bytes))
+        extracted = asyncio.run(extract_upload_content(upload))
         import_record.extracted_text = extracted.text
         import_record.status = "generating"
         import_record.current_step = f"已解析文本和 {len(extracted.images)} 张图片"
@@ -73,22 +103,17 @@ async def create_import(
         db.commit()
         db.refresh(import_record)
         db.refresh(domain)
-
-        return ContentImportCreateRead(
-            import_record=ContentImportRead.model_validate(import_record),
-            domain=DomainPackRead.model_validate(domain),
-            skill_count=skill_count,
-            question_count=question_count,
-        )
     except HTTPException as exc:
-        _mark_failed(db, import_record, str(exc.detail))
-        raise
+        if import_record is not None:
+            _mark_failed(db, import_record, str(exc.detail))
     except CourseGenerationError as exc:
-        _mark_failed(db, import_record, str(exc))
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if import_record is not None:
+            _mark_failed(db, import_record, str(exc))
     except Exception as exc:
-        _mark_failed(db, import_record, str(exc))
-        raise HTTPException(status_code=500, detail=f"Import failed: {exc}") from exc
+        if import_record is not None:
+            _mark_failed(db, import_record, f"Import failed: {exc}")
+    finally:
+        db.close()
 
 
 def publish_generated_pack(

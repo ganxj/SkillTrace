@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { API_BASE_URL, type ContentImport, type DomainPack } from "@/lib/api";
+import { API_BASE_URL, readApiJson, type ContentImport, type DomainPack } from "@/lib/api";
 
 type ImportResult = {
   import_record: ContentImport;
-  domain: { id: string; name: string; slug: string };
+  domain: { id: string; name: string; slug: string } | null;
   skill_count: number;
   question_count: number;
 };
@@ -29,7 +29,7 @@ export function CourseImporter({ domains }: CourseImporterProps) {
       try {
         const response = await fetch(`${API_BASE_URL}/imports`, { cache: "no-store" });
         if (!response.ok) return;
-        const imports = (await response.json()) as ContentImport[];
+        const imports = await readApiJson<ContentImport[]>(response);
         const latest = imports.find(
           (item) =>
             item.domain_id === selectedDomainId &&
@@ -58,7 +58,7 @@ export function CourseImporter({ domains }: CourseImporterProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
       });
-      const payload = await response.json();
+      const payload = await readApiJson<{ detail?: string }>(response);
       if (!response.ok) throw new Error(payload.detail ?? "创建课程失败。");
       setMessage("课程已创建，请刷新后选择该课程上传文件。");
       window.location.reload();
@@ -80,7 +80,7 @@ export function CourseImporter({ domains }: CourseImporterProps) {
       const response = await fetch(`${API_BASE_URL}/domains/${selectedDomainId}/content`, {
         method: "DELETE"
       });
-      const payload = await response.json();
+      const payload = await readApiJson<{ detail?: string }>(response);
       if (!response.ok) throw new Error(payload.detail ?? "清空课程失败。");
       setMessage("已清空该课程内容，可以重新上传文件生成。");
       window.location.reload();
@@ -105,7 +105,7 @@ export function CourseImporter({ domains }: CourseImporterProps) {
       const response = await fetch(`${API_BASE_URL}/domains/${selectedDomainId}`, {
         method: "DELETE"
       });
-      const payload = await response.json();
+      const payload = await readApiJson<{ detail?: string }>(response);
       if (!response.ok) throw new Error(payload.detail ?? "删除课程失败。");
       setMessage("课程已删除。");
       window.location.reload();
@@ -140,7 +140,7 @@ export function CourseImporter({ domains }: CourseImporterProps) {
         method: "POST",
         body: form
       });
-      const payload = await response.json();
+      const payload = await readApiJson<ImportResult & { detail?: string }>(response);
       if (!response.ok) {
         throw new Error(payload.detail ?? `生成失败：${response.status}`);
       }
@@ -152,7 +152,7 @@ export function CourseImporter({ domains }: CourseImporterProps) {
       try {
         const response = await fetch(`${API_BASE_URL}/imports`, { cache: "no-store" });
         if (response.ok) {
-          const imports = (await response.json()) as ContentImport[];
+          const imports = await readApiJson<ContentImport[]>(response);
           const latestFailed = imports.find(
             (item) => item.domain_id === selectedDomainId && item.status === "failed"
           );
@@ -220,9 +220,9 @@ export function CourseImporter({ domains }: CourseImporterProps) {
       {message && <p className="muted">{message}</p>}
       {result && (
         <div className="result">
-          <strong>{result.domain.name}</strong>
+          <strong>{result.domain?.name ?? "课程生成任务"}</strong>
           <p>
-            {result.domain.slug} · {result.skill_count} 节课 · {result.question_count} 道题
+            {result.domain?.slug ?? result.import_record.status} · {result.skill_count} 节课 · {result.question_count} 道题
           </p>
         </div>
       )}
