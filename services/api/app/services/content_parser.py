@@ -60,10 +60,15 @@ async def extract_upload_text(file: UploadFile) -> str:
     return (await extract_upload_content(file)).text
 
 
+def _sanitize_text(text: str) -> str:
+    """Remove null bytes and other problematic characters for PostgreSQL."""
+    return text.replace("\x00", "")
+
+
 def _decode_text(data: bytes) -> str:
     for encoding in ("utf-8-sig", "utf-8", "gb18030"):
         try:
-            return data.decode(encoding).strip()
+            return _sanitize_text(data.decode(encoding).strip())
         except UnicodeDecodeError:
             continue
     raise HTTPException(status_code=400, detail="Could not decode text file.")
@@ -100,15 +105,15 @@ def _extract_pdf_content(data: bytes) -> ExtractedContent:
             pages.append(
                 ExtractedPage(
                     page_number=index,
-                    text=(page.extract_text() or "").strip(),
+                    text=_sanitize_text((page.extract_text() or "").strip()),
                     images=page_images,
                 )
             )
         body = "\n\n".join(f"[第{page.page_number}页]\n{page.text}" for page in pages if page.text).strip()
         if outline:
-            text = f"PDF目录：\n{outline}\n\nPDF正文：\n{body}".strip()
+            text = _sanitize_text(f"PDF目录：\n{outline}\n\nPDF正文：\n{body}".strip())
         else:
-            text = body
+            text = _sanitize_text(body)
         return ExtractedContent(text=text, pages=pages, images=images)
     except Exception as exc:  # pragma: no cover - third-party parser details vary.
         raise HTTPException(status_code=400, detail=f"Could not parse PDF: {exc}") from exc
@@ -183,6 +188,6 @@ def _extract_docx_text(data: bytes) -> str:
         from docx import Document
 
         document = Document(BytesIO(data))
-        return "\n".join(paragraph.text for paragraph in document.paragraphs).strip()
+        return _sanitize_text("\n".join(paragraph.text for paragraph in document.paragraphs).strip())
     except Exception as exc:  # pragma: no cover - third-party parser details vary.
         raise HTTPException(status_code=400, detail=f"Could not parse DOCX: {exc}") from exc

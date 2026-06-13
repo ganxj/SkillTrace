@@ -49,13 +49,29 @@ This project is currently optimized for local development on Windows.
 
 ### 1. Start The API
 
-If you use Conda locally:
+**Option A: PostgreSQL (Recommended for production-like testing)**
 
 ```bat
-scripts\dev-api-conda.cmd
+scripts\dev-api-pgsql.cmd
 ```
 
-The script activates `conda base`, creates or reuses `services\api\.venv`, installs backend dependencies there, and starts FastAPI on:
+Uses PostgreSQL at `192.168.1.49:5432`. Make sure PostgreSQL is running first.
+
+For background mode:
+
+```bat
+scripts\dev-api-pgsql-bg.cmd
+```
+
+**Option B: SQLite (Quick local demo)**
+
+```bat
+scripts\dev-api-sqlite.cmd
+```
+
+Uses a local SQLite database file. No external database needed.
+
+**API Endpoint:**
 
 ```text
 http://127.0.0.1:8000
@@ -65,12 +81,6 @@ Health check:
 
 ```text
 http://127.0.0.1:8000/api/v1/health
-```
-
-For a SQLite-only demo without Postgres:
-
-```bat
-scripts\dev-api-sqlite.cmd
 ```
 
 ### 2. Start The Admin Console
