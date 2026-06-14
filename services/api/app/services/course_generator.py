@@ -14,7 +14,7 @@ from app.services.content_parser import ExtractedContent, ExtractedImage
 
 
 UNKNOWN_OPTION = "我不会"
-MAX_SEGMENT_CHARS = 1800
+MAX_SEGMENT_CHARS = 3600  # 增加到3600，减少分段数，提升生成效率
 MAX_SEGMENT_IMAGES = 2
 MAX_AI_ATTEMPTS = 3
 

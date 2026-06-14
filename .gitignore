@@ -31,3 +31,4 @@ build/
 postgres_data/
 .codex/
 tmp/
+.tmp-docker-config/
