@@ -371,6 +371,19 @@ h1 {
   font-size: 12px;
 }
 
+.import-row-actions,
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-actions .small-action {
+  min-height: 30px;
+}
+
 .result {
   border: 1px solid var(--line);
   border-radius: 8px;

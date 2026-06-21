@@ -14,12 +14,17 @@ from app.services.content_parser import ExtractedContent, ExtractedImage
 
 
 UNKNOWN_OPTION = "我不会"
+MAX_COURSE_SKILLS = 500
 MAX_SEGMENT_CHARS = 3600  # 增加到3600，减少分段数，提升生成效率
 MAX_SEGMENT_IMAGES = 2
 MAX_AI_ATTEMPTS = 3
 
 
 class CourseGenerationError(RuntimeError):
+    pass
+
+
+class CourseGenerationPaused(RuntimeError):
     pass
 
 
@@ -62,7 +67,7 @@ class GeneratedDomainPack(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     version: str = Field(default="0.1.0", max_length=40)
     description: str = Field(default="")
-    skills: list[GeneratedSkill] = Field(min_length=1, max_length=120)
+    skills: list[GeneratedSkill] = Field(min_length=1, max_length=MAX_COURSE_SKILLS)
 
     @field_validator("skills")
     @classmethod
@@ -86,6 +91,9 @@ def generate_course_pack(
     filename: str,
     course_name: str | None = None,
     progress_callback: Any | None = None,
+    segment_callback: Any | None = None,
+    should_pause: Any | None = None,
+    existing_packs: list[GeneratedDomainPack] | None = None,
 ) -> GeneratedDomainPack:
     if settings.ai_provider.lower() != "openai":
         raise CourseGenerationError("AI_PROVIDER=openai is required for course generation.")
@@ -98,14 +106,19 @@ def generate_course_pack(
         raise CourseGenerationError("The uploaded file does not contain enough extractable text.")
 
     segments = _build_segments(extracted)
+    packs: list[GeneratedDomainPack] = list(existing_packs or [])
+    completed_segments = min(len(packs), len(segments))
     if progress_callback:
-        progress_callback(total=len(segments), processed=0, step="已解析文件，开始分段生成")
+        progress_callback(total=len(segments), processed=completed_segments, step="Content parsed; generation ready.")
 
-    packs: list[GeneratedDomainPack] = []
-    context_summary = ""
+    context_summary = _summarize_generated_context(packs) if packs else ""
     for index, segment in enumerate(segments, start=1):
+        if index <= completed_segments:
+            continue
+        if should_pause and should_pause():
+            raise CourseGenerationPaused("Generation paused.")
         if progress_callback:
-            progress_callback(total=len(segments), processed=index - 1, step=f"正在生成第 {index}/{len(segments)} 段")
+            progress_callback(total=len(segments), processed=index - 1, step=f"Generating segment {index}/{len(segments)}.")
         prompt = _build_segment_prompt(
             segment=segment,
             filename=filename,
@@ -123,13 +136,17 @@ def generate_course_pack(
             segment_total=len(segments),
             progress_callback=progress_callback,
         )
+        if should_pause and should_pause():
+            raise CourseGenerationPaused("Generation paused.")
         packs.append(pack)
+        if segment_callback:
+            segment_callback(index=index, pack=pack, packs=packs)
         context_summary = _summarize_generated_context(packs)
         if progress_callback:
-            progress_callback(total=len(segments), processed=index, step=f"已完成第 {index}/{len(segments)} 段")
+            progress_callback(total=len(segments), processed=index, step=f"Completed segment {index}/{len(segments)}.")
 
     if progress_callback:
-        progress_callback(total=len(segments), processed=len(segments), step="正在合并课程节点")
+        progress_callback(total=len(segments), processed=len(segments), step="Merging generated course segments.")
     return _merge_segment_packs(packs, course_name=course_name)
 
 

@@ -16,6 +16,10 @@ type DashboardProps = {
 
 type AdminSection = "overview" | "courses" | "imports" | "learning";
 
+const activeImportStatuses = new Set(["extracting", "queued", "generating", "pause_requested", "publishing"]);
+const pausableImportStatuses = new Set(["extracting", "queued", "generating", "publishing"]);
+const resumableImportStatuses = new Set(["pause_requested", "paused", "failed"]);
+
 const navItems: Array<{ id: AdminSection; label: string; description: string }> = [
   { id: "overview", label: "概览", description: "当前课程与系统状态" },
   { id: "courses", label: "课程管理", description: "课程列表、新增和生成" },
@@ -94,7 +98,7 @@ function OverviewPanel({ domains, latestDomain, skills, states, imports }: Dashb
   const averageMastery =
     states.length === 0 ? 0 : states.reduce((sum, item) => sum + item.mastery, 0) / states.length;
   const latestQuestions = skills.reduce((sum, skill) => sum + skill.questions.length, 0);
-  const runningImports = imports.filter((item) => !["published", "failed"].includes(item.status)).length;
+  const runningImports = imports.filter((item) => activeImportStatuses.has(item.status)).length;
 
   return (
     <div className="admin-content">
@@ -168,10 +172,12 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
   }, [activeImportId, generatingDomainId]);
 
   useEffect(() => {
-    if (!activeImport || !["published", "failed"].includes(activeImport.status)) return;
+    if (!activeImport || !["published", "failed", "paused"].includes(activeImport.status)) return;
     setGeneratingDomainId(null);
     if (activeImport.status === "published") {
       setMessage("课程生成完成，刷新页面后可查看最新章节和题目。");
+    } else if (activeImport.status === "paused") {
+      setMessage("生成已暂停，可以稍后从已保存的段落继续。");
     } else {
       setMessage(activeImport.error || "课程生成失败。");
     }
@@ -265,6 +271,16 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
     }
   }
 
+  async function controlImport(importId: string, action: "pause" | "resume") {
+    const response = await fetch(`${API_BASE_URL}/imports/${importId}/${action}`, { method: "POST" });
+    const payload = await readApiJson<ContentImport & { detail?: string }>(response);
+    if (!response.ok) throw new Error(payload.detail ?? `${action} failed: ${response.status}`);
+    setActiveImport(payload as ContentImport);
+    setActiveImportId(payload.id);
+    if (action === "resume") setGeneratingDomainId(payload.domain_id);
+    setMessage(action === "pause" ? "已请求暂停，当前 AI 请求结束后会停住。" : "已继续生成，会从已保存的段落接着跑。");
+  }
+
   function latestImportFor(domainId: string) {
     if (activeImport?.domain_id === domainId) return activeImport;
     return imports.find((item) => item.domain_id === domainId);
@@ -338,7 +354,11 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
                     </button>
                   </div>
                 </summary>
-                <CourseImportProgress item={courseImport} isGenerating={generatingDomainId === item.domain.id} />
+                <CourseImportProgress
+                  item={courseImport}
+                  isGenerating={generatingDomainId === item.domain.id}
+                  onAction={controlImport}
+                />
                 <CourseOutline skills={item.skills} />
               </details>
             );
@@ -375,10 +395,19 @@ function CoursesPanel({ courseSummaries, latestDomain, imports }: DashboardProps
 }
 
 function ImportsPanel({ imports }: { imports: ContentImport[] }) {
+  const [items, setItems] = useState(imports);
+
+  async function controlImport(importId: string, action: "pause" | "resume") {
+    const response = await fetch(`${API_BASE_URL}/imports/${importId}/${action}`, { method: "POST" });
+    const payload = await readApiJson<ContentImport & { detail?: string }>(response);
+    if (!response.ok) throw new Error(payload.detail ?? `${action} failed: ${response.status}`);
+    setItems((current) => current.map((item) => (item.id === payload.id ? (payload as ContentImport) : item)));
+  }
+
   return (
     <div className="admin-content">
       <Panel title="导入记录">
-        <ImportList imports={imports} />
+        <ImportList imports={items} onAction={controlImport} />
       </Panel>
     </div>
   );
@@ -467,7 +496,15 @@ function CourseOutline({ skills }: { skills: Skill[] }) {
   );
 }
 
-function CourseImportProgress({ item, isGenerating }: { item?: ContentImport; isGenerating: boolean }) {
+function CourseImportProgress({
+  item,
+  isGenerating,
+  onAction
+}: {
+  item?: ContentImport;
+  isGenerating: boolean;
+  onAction?: (importId: string, action: "pause" | "resume") => Promise<void>;
+}) {
   if (!item && !isGenerating) return null;
   const total = item?.total_segments ?? 0;
   const done = item?.processed_segments ?? 0;
@@ -485,13 +522,20 @@ function CourseImportProgress({ item, isGenerating }: { item?: ContentImport; is
       <div className="progress-meta">
         <span className={`pill ${status}`}>{status}</span>
         {item?.filename && <span>{item.filename}</span>}
+        {item && onAction && <ImportActionButtons item={item} onAction={onAction} />}
         {item?.error && <span className="error">{item.error}</span>}
       </div>
     </div>
   );
 }
 
-function ImportList({ imports }: { imports: ContentImport[] }) {
+function ImportList({
+  imports,
+  onAction
+}: {
+  imports: ContentImport[];
+  onAction?: (importId: string, action: "pause" | "resume") => Promise<void>;
+}) {
   return (
     <div className="stack">
       {imports.length === 0 ? (
@@ -510,9 +554,49 @@ function ImportList({ imports }: { imports: ContentImport[] }) {
               <small>{formatDate(item.completed_at ?? item.created_at)}</small>
               {item.error && <p className="error">{item.error}</p>}
             </div>
-            <span className={`pill ${item.status}`}>{item.status}</span>
+            <div className="import-row-actions">
+              <span className={`pill ${item.status}`}>{item.status}</span>
+              {onAction && <ImportActionButtons item={item} onAction={onAction} />}
+            </div>
           </article>
         ))
+      )}
+    </div>
+  );
+}
+
+function ImportActionButtons({
+  item,
+  onAction
+}: {
+  item: ContentImport;
+  onAction: (importId: string, action: "pause" | "resume") => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const canPause = pausableImportStatuses.has(item.status);
+  const canResume = resumableImportStatuses.has(item.status);
+  if (!canPause && !canResume) return null;
+
+  async function run(action: "pause" | "resume") {
+    setBusy(true);
+    try {
+      await onAction(item.id, action);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="task-actions">
+      {canPause && (
+        <button type="button" className="secondary small-action" disabled={busy} onClick={() => void run("pause")}>
+          暂停
+        </button>
+      )}
+      {canResume && (
+        <button type="button" className="small-action primary-action" disabled={busy} onClick={() => void run("resume")}>
+          继续
+        </button>
       )}
     </div>
   );

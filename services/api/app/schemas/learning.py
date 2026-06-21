@@ -135,11 +135,13 @@ class ContentImportRead(BaseModel):
     id: str
     filename: str
     content_type: str
+    file_sha256: str = ""
     status: str
     error: str
     domain_id: str | None
     total_segments: int = 0
     processed_segments: int = 0
+    control_requested: str = ""
     current_step: str = ""
     created_at: datetime
     completed_at: datetime | None

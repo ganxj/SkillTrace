@@ -23,6 +23,9 @@ def ensure_schema() -> None:
         if "content_imports" in inspector.get_table_names():
             import_columns = {column["name"] for column in inspector.get_columns("content_imports")}
             import_additions = {
+                "file_sha256": "VARCHAR(64) DEFAULT ''",
+                "segment_packs_json": "TEXT DEFAULT '[]'",
+                "control_requested": "VARCHAR(40) DEFAULT ''",
                 "total_segments": "INTEGER DEFAULT 0",
                 "processed_segments": "INTEGER DEFAULT 0",
                 "current_step": "VARCHAR(260) DEFAULT ''",

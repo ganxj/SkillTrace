@@ -49,11 +49,13 @@ export type ContentImport = {
   id: string;
   filename: string;
   content_type: string;
+  file_sha256: string;
   status: string;
   error: string;
   domain_id: string | null;
   total_segments: number;
   processed_segments: number;
+  control_requested: string;
   current_step: string;
   created_at: string;
   completed_at: string | null;
