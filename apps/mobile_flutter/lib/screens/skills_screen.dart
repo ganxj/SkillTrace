@@ -42,6 +42,7 @@ class SkillsScreen extends StatelessWidget {
           }
           final current = currentDomain ?? data.latest;
           return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               for (final domain in data.domains)
                 _CourseCard(
@@ -106,6 +107,7 @@ class _CourseRoadmapScreenState extends State<CourseRoadmapScreen> {
             }
             final currentSkillId = _currentSkillId(data);
             return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 for (var index = 0; index < data.skills.length; index++)
                   _ChapterTile(

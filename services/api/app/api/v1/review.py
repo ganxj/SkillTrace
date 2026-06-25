@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc, nullsfirst, select
+from sqlalchemy import desc, nullsfirst, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.deps import get_user_id
@@ -63,12 +63,30 @@ def next_review(
     if len(items) >= limit:
         return items
 
+    learned_state_query = (
+        select(LearnerSkillState.skill_id)
+        .join(SkillNode, SkillNode.id == LearnerSkillState.skill_id)
+        .where(
+            LearnerSkillState.user_id == user_id,
+            or_(
+                LearnerSkillState.evidence_count > 0,
+                LearnerSkillState.mastery > 0,
+            ),
+        )
+    )
+    if active_domain is not None:
+        learned_state_query = learned_state_query.where(
+            SkillNode.domain_id == active_domain.id
+        )
+
     seen_skill_ids = {item.skill.id for item in items}
+    learned_skill_ids = set(db.scalars(learned_state_query).all())
+    excluded_skill_ids = seen_skill_ids | learned_skill_ids
     fresh_query = select(SkillNode)
     if active_domain is not None:
         fresh_query = fresh_query.where(SkillNode.domain_id == active_domain.id)
-    if seen_skill_ids:
-        fresh_query = fresh_query.where(SkillNode.id.not_in(seen_skill_ids))
+    if excluded_skill_ids:
+        fresh_query = fresh_query.where(SkillNode.id.not_in(excluded_skill_ids))
 
     fresh_skills = list(
         db.scalars(
